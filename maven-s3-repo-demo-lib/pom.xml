@@ -90,9 +90,9 @@
     <extensions>
       <!-- see: https://github.com/spring-projects/aws-maven -->
       <extension>
-        <groupId>com.github.ottogroupsolutionprovider</groupId>
+        <groupId>io.github.kuraun</groupId>
         <artifactId>aws-maven</artifactId>
-        <version>6.0.1</version>
+        <version>7.0.0.RELEASE</version>
       </extension>
     </extensions>
     <plugins>
