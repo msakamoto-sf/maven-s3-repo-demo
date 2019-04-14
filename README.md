@@ -6,6 +6,40 @@ Mavenで非公開(not public)S3リポジトリにdeployするサンプルとデ�
 - Java11 (AdoptOpenJDK)
 - Maven 3.5.2
 
+## サンプルとデモの動かし方
+
+```
+0. AWS CLIツールをインストールして、$HOME/.aws/{credentials|config}をセットアップしておく。
+
+1. S3バケットを作成
+
+2. 1. で作成したバケットに対してRead/Writeアクセスが許可されたAWSユーザのアクセスキーを $HOME/.aws/credentials に反映
+(おそらく最低限、ListBucket/GetBucketLocation/GetObject/PutObject が必要)
+(このユーザが、「成果物をS3にアップロードする」ロールになります)
+
+3. $HOME/.m2/settings.xml に 2. のアクセスキーを反映
+(詳細 : https://github.com/kuraun/aws-maven )
+
+4. maven-s3-repo-demo-lib/pom.xml 中の s3:// で始まるバケット名を、1. で作成したバケット名に修正
+
+5. maven-s3-repo-demo-lib をビルド -> デプロイ
+$ cd maven-s3-repo-demo-lib/
+$ ./mvnw clean package
+$ ./mvnw deploy -P release
+
+6. 1. で作成したバケットに対してReadアクセスが許可されたAWSユーザのアクセスキーを $HOME/.aws/credentials に反映
+(ListBucket/GetObject が必要)
+(このユーザが、「成果物をS3からダウンロードする=利用する」ロールになります)
+
+7. maven-s3-repo-demo-client/pom.xml 中の s3:// で始まるバケット名を、1. で作成したバケット名に修正
+
+8. maven-s3-repo-demo-client をビルド -> 動作確認
+$ cd maven-s3-repo-demo-client/
+$ ./mvnw clean package
+$ java -jar target/maven-s3-repo-demo-client-1.0.jar
+Hello, World! to abc.
+```
+
 ## 細かい作業ログとメモ
 
 ### なぜ S3 リポジトリにdeployしようとしたか
@@ -49,13 +83,33 @@ Mavenで非公開(not public)S3リポジトリにdeployするサンプルとデ�
 - このライブラリを使うクライアントとなるアプリを `maven-s3-repo-demo-client` として作ってみた。
 - `maven-s3-repo-demo-lib` を `mvn install` でローカルインストールして、無事 `maven-s3-repo-demo-client` をビルド・実行成功。
 
+archetype:generate からのコード生成:
+
 ```
-cd maven-s3-repo-demo-lib/
-mvn install -P release
+$ mvn archetype:generate -DarchetypeArtifactId=maven-archetype-quickstart
+(...)
+Define value for property 'groupId': : com.example
+Define value for property 'artifactId': : maven-s3-repo-demo-lib
+Define value for property 'version':  1.0-SNAPSHOT: : 1.0
+Define value for property 'package':  com.example: : com.example.lib
+
+$ mvn archetype:generate -DarchetypeArtifactId=maven-archetype-quickstart
+(...)
+Define value for property 'groupId': : com.example
+Define value for property 'artifactId': : maven-s3-repo-demo-client
+Define value for property 'version':  1.0-SNAPSHOT: : 1.0
+Define value for property 'package':  com.example: : com.example.client
+```
+
+ビルド:
+
+```
+$ cd maven-s3-repo-demo-lib/
+$ mvn install -P release
 ( -> $HOME/.m2/repository/com/example/maven-s3-repo-demo-lib/ の下に成果物が配置される )
 
-cd ../maven-s3-repo-demo-client/
-mvn package
+$ cd ../maven-s3-repo-demo-client/
+$ mvn package
 java -jar target/maven-s3-repo-demo-client-1.0.jar
 Hello, World! to abc.
 ```
@@ -538,5 +592,192 @@ $ aws s3 ls s3://maven-s3-repo-demo/release/com/example/maven-s3-repo-demo-lib/1
 2019-04-14 19:34:57         40 maven-s3-repo-demo-lib-1.0.pom.sha1
 ```
 
+### ライブラリを参照するクライアント側のpom.xml設定
 
+ここまでは「ライブラリ側」の setting.xml や pom.xml 設定。
 
+今度は、ライブラリを参照する側の設定を見ていく。
+
+まず settings.xml に追加した `<server>` エントリーをすべて削除し、pom.xmlでも特にリポジトリ設定が無い状態にして、ビルドしてみる。
+
+```
+$ cd maven-s3-repo-demo-client/
+$ mvn package
+(...)
+[INFO] --------------------------------[ jar ]---------------------------------
+Downloading from central: https://repo.maven.apache.org/maven2/com/example/maven-s3-repo-demo-lib/1.0/maven-s3-repo-demo-lib-1.0.pom
+[WARNING] The POM for com.example:maven-s3-repo-demo-lib:jar:1.0 is missing, no dependency information available
+Downloading from central: https://repo.maven.apache.org/maven2/com/example/maven-s3-repo-demo-lib/1.0/maven-s3-repo-demo-lib-1.0.jar
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  3.027 s
+[INFO] Finished at: 2019-04-14T20:37:28+09:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal on project maven-s3-repo-demo-client: Could not resolve dependencies for project com.example:maven-s3-repo-demo-client:jar:1.0: Could not find artifact com.example:maven-s3-repo-demo-lib:jar:1.0 in central (https://repo.maven.apache.org/maven2) -> [Help 1]
+```
+
+当然、リポジトリが見つからず失敗する。エラーもシンプルな "Could not find artifact com.example:maven-s3-repo-demo-lib:jar:1.0" だけ。
+
+続いて maven-s3-repo-demo-client の pom.xml に以下を挿入し、ビルドしてみる。
+
+```xml
+(...)
+  </properties>
+
+  <repositories>
+    <repository>
+      <id>aws-release</id>
+      <url>s3://maven-s3-repo-demo/release</url>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <snapshots>
+        <enabled>false</enabled>
+      </snapshots>
+    </repository>
+    <repository>
+      <id>aws-snapshot</id>
+      <url>s3://maven-s3-repo-demo/snapshot</url>
+      <releases>
+        <enabled>false</enabled>
+      </releases>
+      <snapshots>
+        <enabled>true</enabled>
+      </snapshots>
+    </repository>
+  </repositories>
+
+  <dependencies>
+(...)
+```
+
+`mvn clean package` :
+
+```
+(...)
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+(...)
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal on project maven-s3-repo-demo-client: Could not resolve dependencies for project com.example:maven-s3-repo-demo-client:jar:1.0: Failed to collect dependencies at com.example:maven-s3-repo-demo-lib:jar:1.0: Failed to read artifact descriptor for com.example:maven-s3-repo-demo-lib:jar:1.0: Could not transfer artifact com.example:maven-s3-repo-demo-lib:pom:1.0 from/to aws-release (s3://maven-s3-repo-demo/release): Cannot access s3://maven-s3-repo-demo/release with type default using the available connector factories: BasicRepositoryConnectorFactory: Cannot access s3://maven-s3-repo-demo/release using the registered transporter factories: WagonTransporterFactory: java.util.NoSuchElementException
+```
+
+エラーメッセージが長いが、どうも `s3://maven-s3-repo-demo/release` に対応するwagon側のクラスが見つからず、factoryでエラーになっているように思える。
+
+そこで、ライブラリ側と同様に pom.xml の `build` に `extension` を追加する:
+
+```xml
+(...)
+  <build>
+    <extensions>
+      <extension>
+        <groupId>io.github.kuraun</groupId>
+        <artifactId>aws-maven</artifactId>
+        <version>7.0.0.RELEASE</version>
+      </extension>
+    </extensions>
+    <plugins>
+(...)
+```
+
+`mvn clean package` :
+
+```
+(...)
+[INFO] --------------------------------[ jar ]---------------------------------
+Downloading from aws-release: s3://maven-s3-repo-demo/release/com/example/maven-s3-repo-demo-lib/1.0/maven-s3-repo-demo-lib-1.0.pom
+[WARNING] Ignoring profile 'admin' on line 4 because it did not start with 'profile ' and it was not 'default'.
+Downloaded from aws-release: s3://maven-s3-repo-demo/release/com/example/maven-s3-repo-demo-lib/1.0/maven-s3-repo-demo-lib-1.0.pom (3.6 kB at 1.9 kB/s)
+Downloading from aws-release: s3://maven-s3-repo-demo/release/com/example/maven-s3-repo-demo-lib/1.0/maven-s3-repo-demo-lib-1.0.jar
+Downloaded from aws-release: s3://maven-s3-repo-demo/release/com/example/maven-s3-repo-demo-lib/1.0/maven-s3-repo-demo-lib-1.0.jar (4.6 kB at 20 kB/s)
+(...)
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+(...)
+```
+
+なんと、S3から正常にjarをDLして、ビルドに成功してしまった・・・。
+
+原因は認証情報の読み込みが `$HOME/.aws/credentials` に自動でfallbackされ、そちらのキーが使われたため。
+
+-> `$HOME/.aws/credentials` を適当にリネームし、さらに `$HOME/.m2/repository/com/example/` 以下から先程DLされてしまったキャッシュも削除してもう一度 `mvn clean package` すると・・・
+
+```
+[INFO] --------------------------------[ jar ]---------------------------------
+Downloading from aws-release: s3://maven-s3-repo-demo/release/com/example/maven-s3-repo-demo-lib/1.0/maven-s3-repo-demo-lib-1.0.pom
+[WARNING] Ignoring profile 'admin' on line 4 because it did not start with 'profile ' and it was not 'default'.
+Downloading from central: https://repo.maven.apache.org/maven2/com/example/maven-s3-repo-demo-lib/1.0/maven-s3-repo-demo-lib-1.0.pom
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  4.272 s
+[INFO] Finished at: 2019-04-14T20:51:27+09:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal on project maven-s3-repo-demo-client: \
+  Could not resolve dependencies for project com.example:maven-s3-repo-demo-client:jar:1.0: \
+  Failed to collect dependencies at com.example:maven-s3-repo-demo-lib:jar:1.0: \
+  Failed to read artifact descriptor for com.example:maven-s3-repo-demo-lib:jar:1.0: \
+  Could not transfer artifact com.example:maven-s3-repo-demo-lib:pom:1.0 from/to aws-release (s3://maven-s3-repo-demo/release): \
+  Unable to load credentials from any of the providers in the chain AwsCredentialsProviderChain(\
+    credentialsProviders=[SystemPropertyCredentialsProvider(), EnvironmentVariableCredentialsProvider(), \
+    ProfileCredentialsProvider(), ContainerCredentialsProvider(), InstanceProfileCredentialsProvider()]) : \
+    [SystemPropertyCredentialsProvider(): Unable to load credentials from system settings. \
+    Access key must be specified either via environment variable (AWS_ACCESS_KEY_ID) or system property (aws.accessKeyId)., \
+    EnvironmentVariableCredentialsProvider(): Unable to load credentials from system settings. \
+    Access key must be specified either via environment variable (AWS_ACCESS_KEY_ID) or system property (aws.accessKeyId)., \
+    ProfileCredentialsProvider(): (...)
+```
+
+今度は想定通り、認証情報が見つからずエラーになってくれました。
+
+試しに `$HOME/.m2/settings.xml` の `<server>` でアクセスキー指定を戻してみましたが、これも上記と同じエラー。
+
+**利用する側では settings.xml の `<server>` は無視するようです。**
+推測ですが、mavenプラグイン側もAWS SDK for Javaを使ってる以上、AWS SDK がサポートしているアクセスキーの取得方式に従っているのではないでしょうか。deployのみ、特別に settings.xml の `<server>` 要素「も」参照しているように思います。(実際、 https://github.com/kuraun/aws-maven のREADME.mdにもそのような記述があります)
+
+試しに `AWS_ACCESS_KEY_ID` と `AWS_SECRET_ACCESS_KEY` 環境変数を設定し、`aws s3 cli` が動作するのを確認して `mvn clean package` したところ S3 からjarをダウンロードし、正常にビルド完了しました。
+
+**いずれにせよ、アクセスにはAWSユーザのアカウントが必要になるようです。**
+
+今回はテスト用に、`maven-s3-repo-demo` S3 Bucketに対して必要最小限のアクセス権限を有するユーザを作成し、 `$HOME/.aws/credentials` もそれに合わせて書き換えてみます。**つまり、ライブラリの「開発者」と「利用者」を明確に分離してみます。**
+
+1. AWSから、どのグループにも属さず、ポリシーも何もアタッチしていないユーザを作成します。Webコンソールにはアクセスさせない、ツールやSDK用のユーザとして作成します。今回は `lowpriv1` というユーザを作成しました。
+3. `$HOME/.aws/credentials` の `[default]` のIDとキーを、 `lowpriv1` 用に変更します。
+4. 以下の内容でポリシーを新規に作成し、`lowpriv1` のユーザにアタッチし、 `aws s3 ls s3://maven-s3-repo-demo/` で指定のbucket以下にreadアクセスできることを確認します。
+
+Mavenからのアクセス用の最低限度のポリシー : `ListBucket` と `GetObject` を許可する。
+
+```
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "MavenS3RepositoryDemo20190414",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::maven-s3-repo-demo",
+                "arn:aws:s3:::maven-s3-repo-demo/*"
+            ]
+        }
+    ]
+}
+```
+
+ここまで確認できたら、`mvn clean package` でビルドします。
+**今度は正常にjarファイルをDLし、ビルド成功しました。**
+(なお `lowpriv1` ユーザからこのポリシーを削除すると、今度はjarがDLできずにビルド失敗します。)
+
+- https://github.com/kuraun/aws-maven のREADME.md では、バケットの方に `ListBucket/GetObject` を公開で許可するポリシー(`Principal` が `*`)をattachしています。
+- 全世界に対して公開するライブラリならそれでも構いませんが、内部でだけ使いたい場合は、今回の例のように個別にポリシーを調整します。
+
+最後にもう一度 `$HOME/.m2/repository/com/example/maven-s3-repo-demo-lib` を削除し、Eclipse上で maven-s3-repo-demo-client を読み込んで、Eclipse上からもS3の成果物をDLしてビルド成功することを確認しました。
+
+以上
