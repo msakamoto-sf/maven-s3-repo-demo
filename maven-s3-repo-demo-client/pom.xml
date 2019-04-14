@@ -17,6 +17,29 @@
     <exec.mainClass>com.example.client.Main</exec.mainClass>
   </properties>
 
+  <repositories>
+    <repository>
+      <id>aws-release</id>
+      <url>s3://maven-s3-repo-demo/release</url>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <snapshots>
+        <enabled>false</enabled>
+      </snapshots>
+    </repository>
+    <repository>
+      <id>aws-snapshot</id>
+      <url>s3://maven-s3-repo-demo/snapshot</url>
+      <releases>
+        <enabled>false</enabled>
+      </releases>
+      <snapshots>
+        <enabled>true</enabled>
+      </snapshots>
+    </repository>
+  </repositories>
+
   <dependencies>
     <dependency>
       <groupId>com.example</groupId>
@@ -26,6 +49,14 @@
   </dependencies>
 
   <build>
+    <extensions>
+      <!-- see: https://github.com/spring-projects/aws-maven -->
+      <extension>
+        <groupId>io.github.kuraun</groupId>
+        <artifactId>aws-maven</artifactId>
+        <version>7.0.0.RELEASE</version>
+      </extension>
+    </extensions>
     <plugins>
 
       <plugin>
